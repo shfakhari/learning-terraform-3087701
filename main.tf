@@ -14,7 +14,7 @@ data "aws_ami" "app_ami" {
   owners = ["099720109477"] # Canonical
 }
 
-data "aws_vps" "default" {
+data "aws_vpc" "default" {
   default = true
 }
 
