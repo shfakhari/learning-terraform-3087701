@@ -38,11 +38,25 @@ resource "aws_instance" "blog" {
   instance_type = var.instance_type
   vpc_security_group_ids = [module.blog_sg.security_group_id]
 
-  subnet_id = module.blog_vpc.public_subnets[0]
+  subnet_id                   = module.blog_vpc.public_subnets[0]
+  associate_public_ip_address = true # needed so the instance can download nginx
+
+  user_data                   = <<-EOF
+    #!/bin/bash
+    apt-get update -y
+    apt-get install -y nginx
+    echo "<h1>Hello from Terraform - $(hostname)</h1>" > /var/www/html/index.html
+    systemctl enable --now nginx
+  EOF
+  user_data_replace_on_change = true
 
   tags = {
     Name = "HelloWorld"
   }
+}
+
+output "alb_dns_name" {
+  value = module.blog_alb.dns_name
 }
 
 module "blog_sg" {
