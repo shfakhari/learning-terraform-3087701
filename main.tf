@@ -32,33 +32,6 @@ module "blog_vpc" {
   }
 }
 
-
-resource "aws_instance" "blog" {
-  ami           = data.aws_ami.app_ami.id
-  instance_type = var.instance_type
-  vpc_security_group_ids = [module.blog_sg.security_group_id]
-
-  subnet_id                   = module.blog_vpc.public_subnets[0]
-  associate_public_ip_address = true # needed so the instance can download nginx
-
-  user_data                   = <<-EOF
-    #!/bin/bash
-    apt-get update -y
-    apt-get install -y nginx
-    echo "<h1>Hello from Terraform - $(hostname)</h1>" > /var/www/html/index.html
-    systemctl enable --now nginx
-  EOF
-  user_data_replace_on_change = true
-
-  tags = {
-    Name = "HelloWorld"
-  }
-}
-
-output "alb_dns_name" {
-  value = module.blog_alb.dns_name
-}
-
 module "blog_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.13.0"
@@ -105,8 +78,41 @@ resource "aws_lb_target_group" "blog" {
   vpc_id   = module.blog_vpc.vpc_id
 }
 
-resource "aws_lb_target_group_attachment" "blog" {
-  target_group_arn = aws_lb_target_group.blog.arn
-  target_id        = aws_instance.blog.id
-  port             = 80
+output "alb_dns_name" {
+  value = module.blog_alb.dns_name
+}
+
+module "blog_autoscaling" {
+  source  = "terraform-aws-modules/autoscaling/aws"
+  version = "9.0.2"
+  
+  name = "blog"
+
+  min_size = 1
+  max_size = 2
+
+  # Private subnets: instances reach the internet (to install nginx) via the NAT gateway
+  vpc_zone_identifier = module.blog_vpc.private_subnets
+
+  launch_template_name = "blog"
+
+  security_groups = [module.blog_sg.security_group_id]
+  instance_type   = var.instance_type
+  image_id        = data.aws_ami.app_ami.id
+
+  # The autoscaling module expects user_data already base64-encoded
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    apt-get update -y
+    apt-get install -y nginx
+    echo "<h1>Hello from Terraform - $(hostname)</h1>" > /var/www/html/index.html
+    systemctl enable --now nginx
+  EOF
+  )
+
+  traffic_source_attachments = {
+    blog-alb = {
+      traffic_source_identifier = aws_lb_target_group.blog.arn
+    }
+  }
 }
